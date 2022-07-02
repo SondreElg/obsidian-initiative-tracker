@@ -52,8 +52,9 @@
     let damage: string = "";
     let status: Condition = null;
     let updatingCreatures: {[key: string]: any}[] = [];
-    const updateCreatures = (toAddString: string, tag: Condition) => {
+    const updateCreatures = (toAddString: string, tag: Condition, log: boolean = true) => {
         const roundHalf = !toAddString.includes(".");
+        const active = creatures.find(c => c.active).name;
 
         updatingCreatures.forEach(entry => {
             const modifier = (
