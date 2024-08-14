@@ -1,7 +1,12 @@
 <script lang="ts">
-    import type { SRDMonster } from "index";
+    import type { SRDMonster } from "src/types/creatures";
     import { ExtraButtonComponent, setIcon } from "obsidian";
-    import { convertFraction, DEFAULT_UNDEFINED, XP_PER_CR } from "src/utils";
+    import {
+        convertFraction,
+        FRIENDLY,
+        getRpgSystem,
+        HIDDEN
+    } from "src/utils";
     import { encounter } from "../../stores/encounter";
     import Nullable from "../Nullable.svelte";
     import { getContext } from "svelte";
@@ -11,6 +16,7 @@
     const { average } = players;
 
     const plugin = getContext("plugin");
+    const rpgSystem = getRpgSystem(plugin);
     const remove = (node: HTMLElement) => {
         new ExtraButtonComponent(node).setIcon("minus-circle");
     };
@@ -20,29 +26,33 @@
     const del = (node: HTMLElement) => {
         new ExtraButtonComponent(node).setIcon("trash-2");
     };
-
-    
+    const hide = (node: HTMLElement) => {
+        new ExtraButtonComponent(node).setIcon(HIDDEN);
+    };
+    const hideIcon = (node: HTMLElement) => {
+        setIcon(node, HIDDEN);
+    };
+    const friend = (node: HTMLElement) => {
+        new ExtraButtonComponent(node).setIcon(FRIENDLY);
+    };
+    const friendIcon = (node: HTMLElement) => {
+        setIcon(node, FRIENDLY);
+    };
 
     export let count: number;
     export let creature: SRDMonster;
-    const convertedCR = (cr: string | number) => {
-        if (cr == undefined) return DEFAULT_UNDEFINED;
-        if (cr == "1/8") {
-            return "⅛";
-        }
-        if (cr == "1/4") {
-            return "¼";
-        }
-        if (cr == "1/2") {
-            return "½";
-        }
-        return cr;
-    };
+    $: insignificant =
+        "cr" in creature &&
+        creature.cr &&
+        convertFraction(creature.cr) < $average - 3;
+    $: challenge =
+        "cr" in creature &&
+        creature.cr &&
+        convertFraction(creature.cr) > $average + 3;
 
-    const insignificant = convertFraction(creature.cr) < $average - 3;
+    $: playerLevels = $players.filter(p => p.enabled).map(p => p.level);
 
     const baby = (node: HTMLElement) => setIcon(node, "baby");
-    const challenge = convertFraction(creature.cr) > $average + 3;
 
     const skull = (node: HTMLElement) => setIcon(node, "skull");
 
@@ -64,6 +74,20 @@
         <div use:add on:click={() => encounter.add(creature)} />
     </div>
     <div class="encounter-creature">
+        {#if creature.hidden}
+            <div
+                class="contains-icon"
+                use:hideIcon
+                aria-label={`This creature is hidden.`}
+            />
+        {/if}
+        {#if creature.friendly}
+            <div
+                class="contains-icon"
+                use:friendIcon
+                aria-label={`This creature is an ally.`}
+            />
+        {/if}
         <strong class="encounter-creature-name" on:click={open}>
             {creature.name}
         </strong>
@@ -86,22 +110,22 @@
             />
         {/if}
     </div>
+    {#each rpgSystem.getAdditionalCreatureDifficultyStats(creature, playerLevels) as stat}
+        <div class="encounter-creature-context">
+            <span>{stat}</span>
+        </div>
+    {/each}
     <div class="encounter-creature-context">
         <span>
-            <Nullable str={`${convertedCR(creature.cr)} CR`} />
-        </span>
-    </div>
-    <div class="encounter-creature-context">
-        <span>
-            <Nullable
-                str={`${
-                    XP_PER_CR[creature.cr]?.toLocaleString() ??
-                    DEFAULT_UNDEFINED
-                } XP`}
-            />
+            <Nullable str={rpgSystem.formatDifficultyValue(rpgSystem.getCreatureDifficulty(creature, playerLevels), true)} />
         </span>
     </div>
     <div class="encounter-creature-controls">
+        <div use:hide on:click={() => (creature.hidden = !creature.hidden)} />
+        <div
+            use:friend
+            on:click={() => (creature.friendly = !creature.friendly)}
+        />
         <div use:del on:click={() => encounter.delete(creature)} />
     </div>
 </div>
@@ -111,7 +135,7 @@
         display: grid;
         align-items: center;
         justify-content: center;
-        grid-template-columns: min-content 1fr 10% 10% auto;
+        grid-template-columns: min-content 1fr 10% 10% auto auto auto;
         gap: 0.5rem;
     }
     .encounter-creature {

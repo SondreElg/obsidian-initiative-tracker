@@ -1,10 +1,4 @@
-import {
-    Component,
-    MarkdownPostProcessorContext,
-    MarkdownRenderChild,
-    Notice,
-    parseYaml
-} from "obsidian";
+import { MarkdownRenderChild, Notice, parseYaml } from "obsidian";
 import type InitiativeTracker from "../main";
 import { Creature } from "../utils/creature";
 
@@ -27,11 +21,13 @@ interface CreatureStats {
     name: string;
     ac: number | string;
     hp: number;
-    modifier: number;
+    modifier: number | number[];
     xp: number;
     display?: string;
     hidden: boolean;
     friendly?: boolean;
+    static?: boolean;
+    rollHP?: boolean;
 }
 
 export const equivalent = (
@@ -42,12 +38,30 @@ export const equivalent = (
         creature.name == existing.name &&
         creature.display == existing.display &&
         creature.ac == existing.ac &&
-        creature.modifier == existing.modifier &&
+        equivalentModifiers(creature.modifier, existing.modifier) &&
         creature.xp == existing.xp &&
         creature.hidden == existing.hidden &&
-        creature.friendly == existing.friendly
+        creature.friendly == existing.friendly &&
+        creature.static == existing.static
     );
 };
+
+function equivalentModifiers(
+    modifier: number | number[],
+    existing: number | number[]
+): boolean {
+    if (typeof modifier != typeof existing) return false;
+    if (typeof modifier == "number") {
+        return modifier == existing;
+    }
+    if (Array.isArray(modifier) && Array.isArray(existing)) {
+        for (let i = 0; i < modifier.length; i++) {
+            if (modifier[i] != existing[i]) return false;
+        }
+        return true;
+    }
+    return false;
+}
 
 export interface ParsedParams {
     name: string;
@@ -64,19 +78,22 @@ export class EncounterParser {
     constructor(public plugin: InitiativeTracker) {}
     async parse(params: EncounterParameters): Promise<ParsedParams> {
         const name = params.name;
-        const party = params.party ?? this.plugin.data.defaultParty;
         const players: string[] = this.parsePlayers(params);
+        const party =
+            params.party ?? players.length
+                ? null
+                : this.plugin.data.defaultParty;
         const hide = this.parseHide(params);
         const rawMonsters = params.creatures ?? [];
-        const rollHP = params.rollHP;
 
-        let creatures = await this.parseRawCreatures(rawMonsters);
+        const rollHP = params.rollHP ?? this.plugin.data.rollHP;
+        let creatures = await this.parseRawCreatures(rawMonsters, rollHP);
 
         const xp = params.xp ?? null;
         const playerLevels = players
             .map((p) => this.plugin.getPlayerByName(p))
             .map((p) => p.level)
-            .filter((p) => p);
+            .filter((p) => p && !isNaN(Number(p)));
 
         return {
             name,
@@ -101,32 +118,31 @@ export class EncounterParser {
         return [];
     }
     parsePlayers(params: EncounterParameters) {
-        const partyName = params.party ?? this.plugin.data.defaultParty;
         const playersToReturn: string[] = [];
         const players = params.players;
-        if (
-            partyName &&
-            this.plugin.data.parties.find(
-                (p) => p.name.toLowerCase() == partyName.toLowerCase()
-            )
-        ) {
-            const party = this.plugin.data.parties.find(
-                (p) => p.name.toLowerCase() == partyName.toLowerCase()
-            );
-            playersToReturn.push(...party.players);
+        if (params.party) {
+            if (
+                this.plugin.data.parties.find(
+                    (p) => p.name.toLowerCase() == params.party.toLowerCase()
+                )
+            ) {
+                const party = this.plugin.data.parties.find(
+                    (p) => p.name.toLowerCase() == params.party.toLowerCase()
+                );
+                playersToReturn.push(...party.players);
+            }
         }
         if (players == "none" || players == false) {
             playersToReturn.splice(0, playersToReturn.length);
         } else if (players == true) {
             playersToReturn.push(
-                ...this.plugin.data.players.map((p) => p.name)
+                ...[...this.plugin.players.values()].map((p) => p.name)
             );
-        } else if (!players && !params.party) {
         } else if (typeof players == "string") {
             playersToReturn.push(players);
         } else if (Array.isArray(players)) {
             playersToReturn.push(
-                ...(this.plugin.data.players ?? [])
+                ...[...(this.plugin.players.values() ?? [])]
                     .map((p) => p.name)
                     .filter((p) =>
                         (players as string[])
@@ -135,14 +151,30 @@ export class EncounterParser {
                     )
             );
         }
+        if (!playersToReturn.length) {
+            let partyName = this.plugin.defaultParty?.name;
+
+            if (
+                partyName &&
+                this.plugin.data.parties.find(
+                    (p) => p.name.toLowerCase() == partyName.toLowerCase()
+                )
+            ) {
+                const party = this.plugin.data.parties.find(
+                    (p) => p.name.toLowerCase() == partyName.toLowerCase()
+                );
+                playersToReturn.push(...party.players);
+            }
+        }
+
         return Array.from(new Set(playersToReturn));
     }
-    async parseRawCreatures(rawMonsters: RawCreatureArray) {
+    async parseRawCreatures(rawMonsters: RawCreatureArray, rollHP: boolean) {
         const creatureMap: Map<Creature, number | string> = new Map();
         if (rawMonsters && Array.isArray(rawMonsters)) {
             for (const raw of rawMonsters) {
                 const { creature, number = 1 } =
-                    this.parseRawCreature(raw) ?? {};
+                    this.parseRawCreature(raw, rollHP) ?? {};
                 if (!creature) continue;
 
                 const stats = {
@@ -153,7 +185,8 @@ export class EncounterParser {
                     modifier: creature.modifier,
                     xp: creature.xp,
                     hidden: creature.hidden,
-                    friendly: creature.friendly
+                    friendly: creature.friendly,
+                    rollHP: creature.rollHP
                 };
                 const existing = [...creatureMap].find(([c]) =>
                     equivalent(c, stats)
@@ -176,7 +209,7 @@ export class EncounterParser {
         }
         return creatureMap;
     }
-    parseRawCreature(raw: RawCreature) {
+    parseRawCreature(raw: RawCreature, globalRollHP: boolean) {
         if (!raw) return {};
         let monster: string | string[] | Record<string, any>,
             number: string | number = 1;
@@ -214,7 +247,8 @@ export class EncounterParser {
             mod: number,
             xp: number,
             hidden: boolean = false,
-            friendly: boolean = false;
+            friendly: boolean = false,
+            rollHP: boolean = globalRollHP;
 
         if (typeof monster == "string") {
             if (monster.match(/,\s+hidden/)) {
@@ -257,7 +291,13 @@ export class EncounterParser {
 
             [hp, ac, mod, xp] = monster
                 .slice(1)
-                .filter((v) => v != "hidden" && v != "friend" && v != "friendly" && v != "ally")
+                .filter(
+                    (v) =>
+                        v != "hidden" &&
+                        v != "friend" &&
+                        v != "friendly" &&
+                        v != "ally"
+                )
                 .map((v) => (isNaN(Number(v)) ? null : Number(v)));
         } else if (typeof monster == "object") {
             ({ creature: name, name: display, hp, ac, mod, xp } = monster);
@@ -265,8 +305,11 @@ export class EncounterParser {
             friendly = monster.friend || monster.ally || false;
         }
 
+        if (hp) {
+            rollHP = false;
+        }
         if (!name || typeof name != "string") return {};
-        let existing = this.plugin.bestiary.find((c) => c.name == name);
+        let existing = this.plugin.getCreatureFromBestiary(name);
         let creature = existing
             ? Creature.from(existing)
             : new Creature({ name });
@@ -278,6 +321,7 @@ export class EncounterParser {
         creature.xp = xp ?? creature.xp;
         creature.hidden = hidden ?? creature.hidden;
         creature.friendly = friendly ?? creature.friendly;
+        creature.rollHP = rollHP ?? globalRollHP ?? creature.rollHP;
 
         return { creature, number };
     }
@@ -353,14 +397,12 @@ export class EncounterBlock extends MarkdownRenderChild {
                 );
             }
         }
-        this.registerEvent(
-            this.plugin.app.workspace.on("initiative-tracker:unload", () => {
-                this.containerEl.empty();
-                this.containerEl.createEl("pre").createEl("code", {
-                    text: `\`\`\`encounter\n${this.src}\`\`\``
-                });
-            })
-        );
+        this.plugin.register(() => {
+            this.containerEl.empty();
+            this.containerEl.createEl("pre").createEl("code", {
+                text: `\`\`\`encounter\n${this.src}\`\`\``
+            });
+        });
     }
     async postprocessTable() {
         const encounterSource = this.src.split("---") ?? [];
@@ -394,13 +436,11 @@ export class EncounterBlock extends MarkdownRenderChild {
                 }
             });
         }
-        this.registerEvent(
-            this.plugin.app.workspace.on("initiative-tracker:unload", () => {
-                this.containerEl.empty();
-                this.containerEl.createEl("pre").createEl("code", {
-                    text: `\`\`\`encounter-table\n${this.src}\`\`\``
-                });
-            })
-        );
+        this.plugin.register(() => {
+            this.containerEl.empty();
+            this.containerEl.createEl("pre").createEl("code", {
+                text: `\`\`\`encounter-table\n${this.src}\`\`\``
+            });
+        });
     }
 }

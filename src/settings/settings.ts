@@ -12,11 +12,8 @@ import {
 
 import type InitiativeTracker from "../main";
 
-import {
-    FileSuggestionModal,
-    FolderSuggestionModal,
-    PlayerSuggestionModal
-} from "../utils/suggester";
+import { PlayerSuggestionModal } from "../utils/suggester";
+import { FileInputSuggest, FolderInputSuggest } from "obsidian-utilities";
 import {
     AC,
     Conditions,
@@ -25,7 +22,11 @@ import {
     HP,
     INITIATIVE
 } from "../utils";
-import type { Condition, HomebrewCreature, InputValidate, Party } from "index";
+import { RpgSystemSetting, getRpgSystem } from "../utils/rpg-system";
+import type { Party } from "./settings.types";
+import type { InputValidate } from "./settings.types";
+import type { Condition } from "src/types/creatures";
+import type { HomebrewCreature } from "src/types/creatures";
 
 export default class InitiativeTrackerSettings extends PluginSettingTab {
     constructor(private plugin: InitiativeTracker) {
@@ -111,9 +112,6 @@ export default class InitiativeTrackerSettings extends PluginSettingTab {
                     }
                 })
             );
-            this._displayHomebrew(
-                containerEl.createDiv("initiative-tracker-additional-container")
-            );
 
             const div = containerEl.createDiv("coffee");
             div.createEl("a", {
@@ -137,7 +135,7 @@ export default class InitiativeTrackerSettings extends PluginSettingTab {
         new Setting(containerEl)
             .setName("Display Beginner Tips")
             .setDesc(
-                "Display instructions in the intiative tracker, helping you get used to the workflow."
+                "Display instructions in the initiative tracker, helping you get used to the workflow."
             )
             .addToggle((t) => {
                 t.setValue(this.plugin.data.beginnerTips).onChange(
@@ -171,15 +169,7 @@ export default class InitiativeTrackerSettings extends PluginSettingTab {
                     await this.plugin.saveSettings();
                 });
             });
-        new Setting(containerEl)
-            .setName("Use Legacy 'Add Creatures'")
-            .setDesc("Use the legacy way to add creatures.")
-            .addToggle((t) => {
-                t.setValue(this.plugin.data.useLegacy).onChange(async (v) => {
-                    this.plugin.data.useLegacy = v;
-                    await this.plugin.saveSettings();
-                });
-            });
+
         new Setting(containerEl)
             .setName("Embed statblock-link content in the Creature View")
             .setDesc(
@@ -189,19 +179,6 @@ export default class InitiativeTrackerSettings extends PluginSettingTab {
                 t.setValue(this.plugin.data.preferStatblockLink).onChange(
                     async (v) => {
                         this.plugin.data.preferStatblockLink = v;
-                        await this.plugin.saveSettings();
-                    }
-                );
-            });
-        new Setting(containerEl)
-            .setName("Include 5e SRD")
-            .setDesc(
-                "The 5e SRD will be available for use in the Initiative Tracker."
-            )
-            .addToggle((t) => {
-                t.setValue(this.plugin.data.integrateSRD).onChange(
-                    async (v) => {
-                        this.plugin.data.integrateSRD = v;
                         await this.plugin.saveSettings();
                     }
                 );
@@ -341,19 +318,16 @@ export default class InitiativeTrackerSettings extends PluginSettingTab {
                 let folders = this.app.vault
                     .getAllLoadedFiles()
                     .filter((f) => f instanceof TFolder);
-                const modal = new FolderSuggestionModal(
+                const modal = new FolderInputSuggest(
                     this.app,
                     t,
                     folders as TFolder[]
                 );
-                modal.onClose = t.inputEl.onblur = async () => {
-                    const v = t.inputEl.value?.trim()
-                        ? t.inputEl.value.trim()
-                        : "/";
-                    this.plugin.data.logFolder = normalizePath(v);
+                modal.onSelect(async ({ item }) => {
+                    this.plugin.data.logFolder = normalizePath(item.path);
                     await this.plugin.saveSettings();
                     this.display();
-                };
+                });
             });
     }
     private _displayPlayers(additionalContainer: HTMLDetailsElement) {
@@ -392,7 +366,7 @@ export default class InitiativeTrackerSettings extends PluginSettingTab {
             });
         const additional = additionalContainer.createDiv("additional");
         const playerView = additional.createDiv("initiative-tracker-players");
-        if (!this.plugin.data.players.length) {
+        if (!this.plugin.players.size) {
             additional
                 .createDiv({
                     attr: {
@@ -408,16 +382,38 @@ export default class InitiativeTrackerSettings extends PluginSettingTab {
             );
 
             headers.createDiv({ text: "Name" });
-            new ExtraButtonComponent(headers.createDiv())
-                .setIcon(HP)
-                .setTooltip("Max HP");
-            new ExtraButtonComponent(headers.createDiv())
-                .setIcon(AC)
-                .setTooltip("Armor Class");
-            new ExtraButtonComponent(headers.createDiv())
-                .setIcon(INITIATIVE)
-                .setTooltip("Initiative Modifier");
-
+            setIcon(
+                headers.createDiv({
+                    attr: {
+                        "aria-label": "Level"
+                    }
+                }),
+                "swords"
+            );
+            setIcon(
+                headers.createDiv({
+                    attr: {
+                        "aria-label": "Max HP"
+                    }
+                }),
+                HP
+            );
+            setIcon(
+                headers.createDiv({
+                    attr: {
+                        "aria-label": "Armor Class"
+                    }
+                }),
+                AC
+            );
+            setIcon(
+                headers.createDiv({
+                    attr: {
+                        "aria-label": "Initiative Modifier"
+                    }
+                }),
+                INITIATIVE
+            );
             headers.createDiv();
 
             for (let player of this.plugin.data.players) {
@@ -425,6 +421,9 @@ export default class InitiativeTrackerSettings extends PluginSettingTab {
                     "initiative-tracker-player"
                 );
                 playerDiv.createDiv({ text: player.name });
+                playerDiv.createDiv({
+                    text: `${player.level ?? DEFAULT_UNDEFINED}`
+                });
                 playerDiv.createDiv({
                     text: `${player.hp ?? DEFAULT_UNDEFINED}`
                 });
@@ -449,10 +448,6 @@ export default class InitiativeTrackerSettings extends PluginSettingTab {
                                 player,
                                 modal.player
                             );
-                            this.plugin.app.workspace.trigger(
-                                "initiative-tracker:creature-updated-in-settings",
-                                player
-                            );
 
                             this._displayPlayers(additionalContainer);
                         };
@@ -461,12 +456,36 @@ export default class InitiativeTrackerSettings extends PluginSettingTab {
                     .setIcon("trash")
                     .setTooltip("Delete")
                     .onClick(async () => {
-                        this.plugin.data.players =
-                            this.plugin.data.players.filter((p) => p != player);
+                        this.plugin.deletePlayer(player);
 
                         await this.plugin.saveSettings();
                         this._displayPlayers(additionalContainer);
                     });
+            }
+            for (let [name, player] of this.plugin.statblock_players) {
+                const playerDiv = playerView.createDiv(
+                    "initiative-tracker-player"
+                );
+                playerDiv.createDiv({ text: name });
+                playerDiv.createDiv({
+                    text: `${player.level ?? DEFAULT_UNDEFINED}`
+                });
+                playerDiv.createDiv({
+                    text: `${player.hp ?? DEFAULT_UNDEFINED}`
+                });
+                playerDiv.createDiv({
+                    text: `${player.ac ?? DEFAULT_UNDEFINED}`
+                });
+                playerDiv.createDiv({
+                    text: `${player.modifier ?? DEFAULT_UNDEFINED}`
+                });
+                const icons = playerDiv.createDiv({
+                    cls: "initiative-tracker-player-icon imported",
+                    attr: {
+                        "aria-label": "Imported from Fantasy Statblocks"
+                    }
+                });
+                setIcon(icons, "heart-handshake");
             }
         }
     }
@@ -476,7 +495,7 @@ export default class InitiativeTrackerSettings extends PluginSettingTab {
             this.plugin.data.openState.player = additionalContainer.open;
         };
         const summary = additionalContainer.createEl("summary");
-        new Setting(summary).setHeading().setName("Encounter Builder");
+        new Setting(summary).setHeading().setName("Encounters");
         summary.createDiv("collapser").createDiv("handle");
         const explanation = additionalContainer.createDiv(
             "initiative-tracker-explanation"
@@ -493,12 +512,95 @@ export default class InitiativeTrackerSettings extends PluginSettingTab {
             .setName("Add Sidebar Shortcut")
             .setDesc(
                 "A sidebar shortcut will be added to open the Encounter Builder."
-            ).addToggle(t => {
-                t.setValue(this.plugin.data.builder.sidebarIcon).onChange(v => {
-                    this.plugin.data.builder.sidebarIcon = v;
-                    this.plugin.setBuilderIcon();
-                })
+            )
+            .addToggle((t) => {
+                t.setValue(this.plugin.data.builder.sidebarIcon).onChange(
+                    (v) => {
+                        this.plugin.data.builder.sidebarIcon = v;
+                        this.plugin.setBuilderIcon();
+                    }
+                );
             });
+        new Setting(additionalContainer)
+            .setName("XP System")
+            .setDesc("XP system to use for encounters")
+            .addDropdown((d) => {
+                Object.values(RpgSystemSetting).forEach((system) =>
+                    d.addOption(
+                        system,
+                        getRpgSystem(this.plugin, system).displayName
+                    )
+                );
+                d.setValue(
+                    this.plugin.data.rpgSystem ?? RpgSystemSetting.Dnd5e
+                );
+                d.onChange(async (v) => {
+                    this.plugin.data.rpgSystem = v;
+                    this.plugin.saveSettings();
+                });
+            });
+
+        const additional = additionalContainer.createDiv("additional");
+        new Setting(additional).setHeading().setName("Saved Encounters");
+        if (!Object.keys(this.plugin.data.encounters).length) {
+            additional
+                .createDiv({
+                    attr: {
+                        style: "display: flex; justify-content: center; padding-bottom: 18px;"
+                    }
+                })
+                .createSpan({
+                    text: "No saved encounters! Create one to see it here."
+                });
+        } else {
+            for (const [name, encounter] of Object.entries(
+                this.plugin.data.encounters
+            )) {
+                new Setting(additional)
+                    .setName(name)
+                    .setDesc(
+                        createFragment((e) => {
+                            const players = [],
+                                creatures = [];
+                            for (const creature of encounter.creatures) {
+                                if (creature.player) {
+                                    players.push(creature.name);
+                                } else {
+                                    creatures.push(creature.name);
+                                }
+                            }
+
+                            if (players.length) {
+                                e.createSpan({
+                                    text: `Players: ${players.join(", ")}`
+                                });
+                                e.createEl("br");
+                            }
+                            if (creatures.length) {
+                                e.createSpan({
+                                    text: `Creatures: ${creatures.join(", ")}`
+                                });
+                                e.createEl("br");
+                            }
+
+                            if (encounter.timestamp) {
+                                e.createSpan({
+                                    text: `${new Date(
+                                        encounter.timestamp
+                                    ).toLocaleString()}`
+                                });
+                            }
+                        })
+                    )
+                    .addExtraButton((b) => {
+                        b.setIcon("trash").onClick(async () => {
+                            this.plugin.removeEncounter(name);
+                            await this.plugin.saveSettings();
+                            this._displayBuilder(additionalContainer);
+                        });
+                    });
+            }
+        }
     }
     private _displayParties(additionalContainer: HTMLDetailsElement) {
         additionalContainer.empty();
@@ -763,7 +865,7 @@ export default class InitiativeTrackerSettings extends PluginSettingTab {
                         }
                     })
                 )
-                .setDesc(status.description)
+                .setDesc(status.description ?? "")
                 .addExtraButton((b) =>
                     b.setIcon("pencil").onClick(() => {
                         const modal = new StatusModal(this.plugin, status);
@@ -837,7 +939,7 @@ export default class InitiativeTrackerSettings extends PluginSettingTab {
             .setDesc(
                 createFragment((e) => {
                     e.createSpan({
-                        text: "Homebrew creatures saved to the TTRPG Statblocks plugin will be available in the quick-add."
+                        text: "Homebrew creatures saved to the TTRPG Statblocks plugin will be available to use."
                     });
                     if (!this.plugin.canUseStatBlocks) {
                         e.createEl("br");
@@ -867,7 +969,7 @@ export default class InitiativeTrackerSettings extends PluginSettingTab {
             });
         if (this.plugin.data.sync) {
             const synced = new Setting(containerEl).setDesc(
-                `${this.plugin.statblock_creatures.length} creatures synced.`
+                `${this.plugin.bestiary.length} creatures synced.`
             );
             synced.settingEl.addClass("initiative-synced");
             setIcon(synced.nameEl, "check-in-circle");
@@ -922,197 +1024,6 @@ export default class InitiativeTrackerSettings extends PluginSettingTab {
                     await this.plugin.saveSettings();
                 };
             });
-        new Setting(containerEl)
-            .setName("Integrate with Obsidian Leaflet")
-            .setDesc(
-                createFragment((e) => {
-                    e.createSpan({
-                        text: "Integrate with the Obsidian Leaflet plugin and display combats on a map."
-                    });
-
-                    if (!this.plugin.canUseLeaflet) {
-                        e.createEl("br");
-                        e.createEl("br");
-                        e.createSpan({
-                            attr: {
-                                style: `color: var(--text-error);`
-                            },
-                            text: "Requires  "
-                        });
-                        e.createEl("a", {
-                            text: "Obsidian Leaflet",
-                            href: "https://github.com/valentine195/obsidian-leaflet-plugin",
-                            cls: "external-link"
-                        });
-                        e.createSpan({
-                            attr: {
-                                style: `color: var(--text-error);`
-                            },
-                            text: " version 4.0.0 to modify."
-                        });
-                    }
-                })
-            )
-            .addToggle((t) => {
-                if (!this.plugin.canUseLeaflet) {
-                    t.setDisabled(true);
-                    this.plugin.data.leafletIntegration = false;
-                }
-                t.setValue(this.plugin.data.leafletIntegration);
-                t.onChange(async (v) => {
-                    this.plugin.data.leafletIntegration = v;
-                    await this.plugin.saveSettings();
-                    this._displayIntegrations(containerEl);
-                });
-            });
-
-        if (this.plugin.canUseLeaflet && this.plugin.data.leafletIntegration) {
-            new Setting(containerEl)
-                .setName("Default Player Marker Type")
-                .setDesc(
-                    createFragment((e) => {
-                        if (this.plugin.data.playerMarker) {
-                            const div = e.createDiv("marker-type-display");
-                            const inner = div.createDiv("marker-icon-display");
-
-                            const marker = this.plugin.leaflet.markerIcons.find(
-                                (icon) =>
-                                    icon.type == this.plugin.data.playerMarker
-                            );
-                            if (marker) {
-                                inner.innerHTML = marker.html;
-                            }
-                        }
-                    })
-                )
-                .addDropdown((drop) => {
-                    for (let marker of this.plugin.leaflet.markerIcons) {
-                        drop.addOption(marker.type, marker.type);
-                    }
-                    drop.setValue(this.plugin.data.playerMarker ?? "default");
-                    drop.onChange(async (v) => {
-                        this.plugin.data.playerMarker = v;
-                        await this.plugin.saveSettings();
-                        this._displayIntegrations(containerEl);
-                    });
-                });
-            new Setting(containerEl)
-                .setName("Default Monster Marker Type")
-                .setDesc(
-                    createFragment((e) => {
-                        if (this.plugin.data.monsterMarker) {
-                            const div = e.createDiv("marker-type-display");
-                            const inner = div.createDiv("marker-icon-display");
-
-                            const marker = this.plugin.leaflet.markerIcons.find(
-                                (icon) =>
-                                    icon.type == this.plugin.data.monsterMarker
-                            );
-                            if (marker) {
-                                inner.innerHTML = marker.html;
-                            }
-                        }
-                    })
-                )
-                .addDropdown((drop) => {
-                    for (let marker of this.plugin.leaflet.markerIcons) {
-                        drop.addOption(marker.type, marker.type);
-                    }
-                    drop.setValue(this.plugin.data.monsterMarker);
-                    drop.onChange(async (v) => {
-                        this.plugin.data.monsterMarker = v;
-                        await this.plugin.saveSettings();
-                        this._displayIntegrations(containerEl);
-                    });
-                });
-        }
-    }
-    private _displayHomebrew(additionalContainer: HTMLElement) {
-        additionalContainer.empty();
-        if (this.plugin.data.homebrew.length) {
-            const additional = additionalContainer.createDiv("additional");
-            new Setting(additional).setHeading().setName("Homebrew Creatures");
-            const warning = additional
-                .createDiv({
-                    attr: {
-                        style: "display: flex; justify-content: center; padding: 18px;"
-                    }
-                })
-                .createEl("strong");
-            warning.createSpan({
-                text: "Homebrew creatures have moved to the "
-            });
-            warning.createEl("a", {
-                text: "5e Statblocks",
-                href: "obsidian://show-plugin?id=obsidian-5e-statblocks"
-            });
-            warning.createSpan({
-                text: " plugin."
-            });
-            if (this.plugin.canUseStatBlocks) {
-                new Setting(additional)
-                    .setName("Migrate Hombrew")
-                    .setDesc(
-                        "Move all created homebrew creatures to the 5e Statblocks plugin."
-                    )
-                    .addButton((b) => {
-                        b.setIcon("install")
-                            .setTooltip("Migrate")
-                            .onClick(async () => {
-                                const statblocks = this.app.plugins.getPlugin(
-                                    "obsidian-5e-statblocks"
-                                );
-                                const existing =
-                                    statblocks.settings.monsters.length;
-                                await statblocks.saveMonsters(
-                                    this.plugin.data.homebrew
-                                );
-                                new Notice(
-                                    `${
-                                        statblocks.settings.monsters.length -
-                                        existing
-                                    } of ${
-                                        this.plugin.data.homebrew.length
-                                    } Homebrew Monsters saved.`
-                                );
-                            });
-                    })
-                    .addExtraButton((b) => {
-                        b.setIcon("cross-in-box")
-                            .setTooltip("Delete Homebrew")
-                            .onClick(async () => {
-                                if (
-                                    await confirmWithModal(
-                                        this.app,
-                                        "Are you sure you want to delete all homebrew creatures?"
-                                    )
-                                ) {
-                                    this.plugin.data.homebrew = [];
-                                    await this.plugin.saveSettings();
-                                    this._displayHomebrew(additionalContainer);
-                                }
-                            });
-                    });
-            } else {
-                additional
-                    .createDiv({
-                        attr: {
-                            style: "display: flex; justify-content: center; padding: 18px;"
-                        }
-                    })
-                    .createEl("strong");
-                warning.createSpan({
-                    text: "Install the "
-                });
-                warning.createEl("a", {
-                    text: "5e Statblocks",
-                    href: "obsidian://show-plugin?id=obsidian-5e-statblocks"
-                });
-                warning.createSpan({
-                    text: " plugin to migrate."
-                });
-            }
-        }
     }
 }
 
@@ -1121,7 +1032,7 @@ class NewPlayerModal extends Modal {
     saved: boolean;
     constructor(
         private plugin: InitiativeTracker,
-        private original?: HomebrewCreature
+        private original: HomebrewCreature = {}
     ) {
         super(plugin.app);
         this.player = { ...(original ?? {}) };
@@ -1144,30 +1055,29 @@ class NewPlayerModal extends Modal {
             .setDesc("Link player to a note in your vault.")
             .addText((t) => {
                 t.setValue(this.player.note ?? "");
-                const modal = new FileSuggestionModal(this.app, t);
-                modal.onClose = async () => {
-                    if (!modal.file) return;
 
-                    const metaData = this.app.metadataCache.getFileCache(
-                        modal.file
-                    );
+                let files = this.app.vault.getFiles();
+                const modal = new FileInputSuggest(this.app, t, files);
+                modal.onSelect(async ({ item: file }) => {
+                    if (!file) return;
+                    const metaData = this.app.metadataCache.getFileCache(file);
 
-                    this.player.note = modal.file.basename;
-                    this.player.path = modal.file.path;
-                    this.player.name = modal.file.basename;
+                    this.player.note = file.basename;
+                    this.player.path = file.path;
+                    this.player.name = file.basename;
 
                     if (!metaData || !metaData.frontmatter) return;
                     const { ac, hp, modifier, level, name } =
                         metaData.frontmatter;
-                    this.player.name = name ? name : this.player.name;
-                    this.player.ac = ac;
-                    this.player.hp = hp;
-                    this.player.level = level;
-                    this.player.modifier = modifier;
+                    this.player.name = name ?? this.player.name;
+                    this.player.ac = ac ?? this.player.ac;
+                    this.player.hp = hp ?? this.player.hp;
+                    this.player.level = level ?? this.player.level;
+                    this.player.modifier = modifier ?? this.player.modifier;
                     this.player["statblock-link"] =
                         metaData.frontmatter["statblock-link"];
                     this.display();
-                };
+                });
             });
 
         let nameInput: InputValidate,
@@ -1185,9 +1095,7 @@ class NewPlayerModal extends Modal {
                         let error = false;
                         if (
                             (!i.value.length && !load) ||
-                            (this.plugin.data.players.find(
-                                (p) => p.name === i.value
-                            ) &&
+                            (this.plugin.players.has(i.value) &&
                                 this.player.name != this.original.name)
                         ) {
                             i.addClass("has-error");
@@ -1267,39 +1175,6 @@ class NewPlayerModal extends Modal {
                     this.player.modifier = Number(v);
                 });
             });
-
-        if (this.plugin.canUseLeaflet) {
-            const markerSetting = new Setting(contentEl)
-                .setName("Leaflet Marker")
-                .addDropdown((drop) => {
-                    for (let marker of this.plugin.leaflet.markerIcons) {
-                        drop.addOption(marker.type, marker.type);
-                    }
-                    drop.setValue(
-                        this.player.marker ??
-                            this.plugin.data.playerMarker ??
-                            "default"
-                    );
-                    drop.onChange(async (v) => {
-                        this.player.marker = v;
-                        this.display();
-                    });
-                });
-
-            if (this.player.marker) {
-                const div = createDiv("marker-type-display");
-                const inner = div.createDiv("marker-icon-display");
-
-                const marker = this.plugin.leaflet.markerIcons.find(
-                    (icon) => icon.type == this.player.marker
-                );
-                if (marker) {
-                    inner.innerHTML = marker.html;
-
-                    markerSetting.descEl.appendChild(div);
-                }
-            }
-        }
 
         let footerEl = contentEl.createDiv();
         let footerButtons = new Setting(footerEl);
@@ -1582,7 +1457,12 @@ class PartyModal extends Modal {
             .setName("Add Player to Party")
             .addText((t) => {
                 playerText = t;
-                new PlayerSuggestionModal(this.plugin, t, this.party);
+                const modal = new PlayerSuggestionModal(this.plugin.app, t, [
+                    ...this.plugin.players.values()
+                ]).onSelect(({ item }) => {
+                    t.setValue(item.name);
+                    modal.close();
+                });
             })
             .addExtraButton((b) =>
                 b.setIcon("plus-with-circle").onClick(() => {
@@ -1592,11 +1472,7 @@ class PartyModal extends Modal {
                         new Notice("That player is already in this party!");
                         return;
                     }
-                    if (
-                        !this.plugin.data.players.find(
-                            (p) => p.name == playerText.getValue()
-                        )
-                    ) {
+                    if (!this.plugin.players.has(playerText.getValue())) {
                         new Notice(
                             "That player doesn't exist! You should make them first."
                         );

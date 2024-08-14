@@ -1,38 +1,33 @@
 <script lang="ts">
     import { ExtraButtonComponent, setIcon } from "obsidian";
-    import { DICE, RANDOM_HP, START_ENCOUNTER } from "src/utils";
+    import { getRpgSystem, DICE, RANDOM_HP, START_ENCOUNTER } from "src/utils";
 
     import { Creature } from "src/utils/creature";
-    import {
-        DifficultyReport,
-        encounterDifficulty,
-        formatDifficultyReport,
-        getCreatureXP
-    } from "src/utils/encounter-difficulty";
     import type InitiativeTracker from "src/main";
-    import type { StackRoller } from "../../../../obsidian-dice-roller/src/roller";
     import { tracker } from "src/tracker/stores/tracker";
-    import type { CreatureState } from "index";
+    import type { CreatureState } from "src/types/creatures";
     import CreatureComponent from "./Creature.svelte";
-    import { setContext } from "svelte/internal";
+    import { setContext } from "svelte";
+    import type { StackRoller } from "@javalent/dice-roller";
 
     export let plugin: InitiativeTracker;
 
     setContext("plugin", plugin);
 
     export let name: string = "Encounter";
-    export let creatures: Map<Creature, number | string>;
+    export let creatures: Map<Creature, number | string> = new Map();
     export let players: string[];
     export let party: string = null;
+
     export let hide: string[] = [];
 
     export let rollHP: boolean = plugin.data.rollHP;
 
     export let playerLevels: number[];
 
-    let totalXP: number;
     let creatureMap: Map<Creature, number> = new Map();
     const rollerMap: Map<Creature, StackRoller> = new Map();
+    const rpgSystem = getRpgSystem(plugin);
 
     for (let [creature, count] of creatures) {
         let number: number = Number(count);
@@ -41,32 +36,15 @@
             roller.on("new-result", () => {
                 creatureMap.set(creature, roller.result);
                 creatureMap = creatureMap;
-                totalXP = [...creatureMap].reduce(
-                    (a, c) => a + getCreatureXP(plugin, c[0]) * c[1],
-                    0
-                );
             });
             rollerMap.set(creature, roller);
-            roller.roll();
+            roller.rollSync();
         } else {
             creatureMap.set(creature, number);
         }
     }
 
-    totalXP = [...creatureMap].reduce(
-        (a, c) => a + getCreatureXP(plugin, c[0]) * c[1],
-        0
-    );
-    let difficulty: DifficultyReport;
-    $: {
-        if (!isNaN(totalXP)) {
-            difficulty = encounterDifficulty(
-                playerLevels,
-                totalXP,
-                [...creatureMap.values()].reduce((acc, curr) => acc + curr)
-            );
-        }
-    }
+    $: difficulty = rpgSystem.getEncounterDifficulty(creatureMap, playerLevels);
 
     const openButton = (node: HTMLElement) => {
         new ExtraButtonComponent(node).setIcon(START_ENCOUNTER);
@@ -87,10 +65,17 @@
             })
             .flat();
         const transformedCreatures: CreatureState[] = [];
-        for (const creature of [
-            ...plugin.getPlayersForParty(party),
-            ...creatures
-        ]) {
+        const combinedPlayers = [
+            ...(party ? plugin.getPlayerNamesForParty(party) : []),
+            ...players
+        ];
+
+        const playersForEncounter: Creature[] = [];
+        for (const name of new Set(combinedPlayers)) {
+            playersForEncounter.push(plugin.getPlayerByName(name));
+        }
+
+        for (const creature of [...playersForEncounter, ...creatures]) {
             transformedCreatures.push(creature.toJSON());
         }
         tracker.new(plugin, {
@@ -100,7 +85,8 @@
             state: false,
             logFile: null,
             roll: true,
-            rollHP
+            rollHP,
+            newLog: true
         });
         plugin.app.workspace.revealLeaf(view.leaf);
     };
@@ -217,7 +203,10 @@
                             >
                                 <CreatureComponent
                                     {creature}
-                                    xp={creature.xp * creatureMap.get(creature)}
+                                    xp={rpgSystem.getCreatureDifficulty(
+                                        creature,
+                                        playerLevels
+                                    )}
                                     shouldShowRoll={!allRolling && rollHP}
                                     {count}
                                 >
@@ -236,21 +225,27 @@
         </div>
         {#if plugin.data.displayDifficulty}
             <div class="encounter-xp difficulty">
-                {#if totalXP > 0 && difficulty}
+                {#if difficulty}
                     <span
-                        aria-label={formatDifficultyReport(difficulty)}
-                        class={difficulty.difficulty.toLowerCase()}
+                        aria-label={difficulty.summary}
+                        class={difficulty.cssClass}
                     >
                         <strong class="difficulty-label"
-                            >{difficulty.difficulty}</strong
+                            >{difficulty.displayName}</strong
                         >
                         <span class="xp-parent difficulty">
                             <span class="paren left">(</span>
                             <span class="xp-container">
-                                <span class="xp number">
-                                    {totalXP}
-                                </span>
-                                <span class="xp text">XP</span>
+                                {#if difficulty.value > 0}
+                                    <span class="xp number"
+                                        >{rpgSystem.formatDifficultyValue(
+                                            difficulty.value
+                                        )}</span
+                                    >
+                                    <span class="xp text"
+                                        >{rpgSystem.valueUnit}</span
+                                    >
+                                {/if}
                             </span>
                             <span class="paren right">)</span>
                         </span>
@@ -297,6 +292,9 @@
     }
     .easy .difficulty-label {
         color: green;
+    }
+    .trivial .difficulty-label {
+        color: #aaaaaa;
     }
     .icons {
         display: flex;

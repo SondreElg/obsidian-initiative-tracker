@@ -3,16 +3,18 @@
     "compilerOptions": {
         "baseUrl": ".",
         "inlineSources": true,
+        "strictPropertyInitialization": false,
+        "strictNullChecks": false,
         "module": "ESNext",
         "target": "ESNext",
-        "allowJs": true,
         "noImplicitAny": true,
         "moduleResolution": "node",
         "importHelpers": true,
-        "types": ["node", "svelte", "jest"],
+        "resolveJsonModule": true,
+        "types": ["node", "svelte"],
         "lib": ["dom", "esnext", "scripthost"],
         "experimentalDecorators": true
     },
-    "include": ["src/*", "@types"],
-    "experimentalDecorators": true
+    "include": ["./src/**/*"],
+    "exclude": ["./dist"]
 }

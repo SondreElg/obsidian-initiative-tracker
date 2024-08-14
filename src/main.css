@@ -21,7 +21,7 @@ body {
 
 .initiative-tracker-additional-container .initiative-tracker-players {
     display: grid;
-    grid-template-columns: 3fr 1fr 1fr 1fr auto;
+    grid-template-columns: 3fr 1fr 1fr 1fr 1fr auto;
     gap: 0.5rem;
 }
 
@@ -46,6 +46,16 @@ body {
     display: grid;
     grid-template-columns: auto auto;
     gap: 0.5rem;
+}
+.initiative-tracker-settings
+    .initiative-tracker-additional-container
+    .initiative-tracker-players
+    .initiative-tracker-player
+    .initiative-tracker-player-icon.imported {
+    display: flex;
+    justify-content: center;
+    width: auto;
+    color: var(--text-success);
 }
 .initiative-tracker-settings
     .initiative-tracker-additional-container
@@ -235,4 +245,48 @@ body {
 .initiative-tracker-textarea + .cm-editor {
     height: 200px;
     margin-bottom: 1rem;
+}
+
+.initiative-tracker.suggestion-item .name,
+.initiative-tracker.suggestion-item > svg {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+.waiting-for-bestiary.is-loading {
+    display: flex;
+    justify-content: center;
+    font-style: italic;
+    color: var(--text-muted);
+}
+
+.waiting-for-bestiary.inline {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    font-size: var(--font-small);
+    --icon-size: var(--icon-s);
+}
+
+.waiting-for-bestiary.inline .icon {
+    display: flex;
+    align-items: center;
+    animation: rotation 1s ease infinite;
+}
+
+
+@keyframes rotation {
+    0% {
+        transform: scale(1) rotate(-60deg);
+    }
+    20% {
+        transform: /* scale(1.1)  */ rotate(-90deg);
+    }
+    50% {
+        transform: /* scale(0.9)  */ rotate(690deg);
+    }
+    100% {
+        transform: /* scale(1) */ rotate(660deg);
+    }
 }

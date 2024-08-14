@@ -3,16 +3,15 @@
 
     import type InitiativeTracker from "src/main";
     import { tracker } from "src/tracker/stores/tracker";
-    import { RANDOM_HP, START_ENCOUNTER } from "src/utils";
+    import {
+        DEFAULT_UNDEFINED,
+        getRpgSystem,
+        RANDOM_HP,
+        START_ENCOUNTER
+    } from "src/utils";
     import { Creature } from "src/utils/creature";
     import CreatureComponent from "./Creature.svelte";
-    import {
-        DifficultyReport,
-        encounterDifficulty,
-        formatDifficultyReport
-    } from "src/utils/encounter-difficulty";
-
-    import type { StackRoller } from "../../../../obsidian-dice-roller/src/roller";
+    import type { StackRoller } from "@javalent/dice-roller";
     import { setContext } from "svelte";
 
     export let name: string = "Encounter";
@@ -27,9 +26,9 @@
     export let headers: string[];
     export let rollHP: boolean = plugin.data.rollHP;
 
-    let totalXP: number;
     let creatureMap: Map<Creature, number> = new Map();
     const rollerMap: Map<Creature, StackRoller> = new Map();
+    const rpgSystem = getRpgSystem(plugin);
 
     for (let [creature, count] of creatures) {
         let number: number = Number(count);
@@ -38,28 +37,15 @@
             roller.on("new-result", () => {
                 creatureMap.set(creature, roller.result);
                 creatureMap = creatureMap;
-                totalXP = [...creatureMap].reduce(
-                    (a, c) => a + c[0].xp * c[1],
-                    0
-                );
             });
             rollerMap.set(creature, roller);
-            roller.roll();
+            roller.rollSync();
         } else {
             creatureMap.set(creature, number);
         }
     }
-    totalXP = [...creatureMap].reduce((a, c) => a + c[0].xp * c[1], 0);
-    let difficulty: DifficultyReport;
-    $: {
-        if (!isNaN(totalXP)) {
-            difficulty = encounterDifficulty(
-                playerLevels,
-                totalXP,
-                [...creatureMap.values()].reduce((acc, curr) => acc + curr)
-            );
-        }
-    }
+
+    $: difficulty = rpgSystem.getEncounterDifficulty(creatureMap, playerLevels);
 
     const open = (node: HTMLElement) => {
         new ExtraButtonComponent(node)
@@ -90,6 +76,7 @@
                     round: 1,
                     state: false,
                     logFile: null,
+                    newLog: true,
                     roll: true,
                     rollHP
                 });
@@ -168,7 +155,10 @@
                         <li aria-label={label(creature)}>
                             <CreatureComponent
                                 {creature}
-                                xp={creature.xp * creatureMap.get(creature)}
+                                xp={rpgSystem.getCreatureDifficulty(
+                                    creature,
+                                    playerLevels
+                                )}
                                 shouldShowRoll={rollHP}
                                 {count}
                             >
@@ -203,17 +193,17 @@
     {#if plugin.data.displayDifficulty}
         <td>
             <div class="encounter-xp difficulty">
-                {#if totalXP > 0 && difficulty}
+                {#if difficulty.value}
                     <span
-                        aria-label={formatDifficultyReport(difficulty)}
-                        class={difficulty.difficulty.toLowerCase()}
+                        aria-label={difficulty.summary}
+                        class={difficulty.cssClass}
                     >
                         <strong class="difficulty-label">
-                            {difficulty.difficulty}
+                            {difficulty.displayName}
                         </strong>
                     </span>
                 {:else}
-                    -
+                    {DEFAULT_UNDEFINED}
                 {/if}
             </div>
         </td>
@@ -238,6 +228,9 @@
     }
     .easy .difficulty-label {
         color: green;
+    }
+    .trivial .difficulty-label {
+        color: #aaaaaa;
     }
     .icons {
         display: flex;

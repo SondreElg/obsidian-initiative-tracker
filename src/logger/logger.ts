@@ -3,7 +3,7 @@ import type InitiativeTracker from "../main";
 import type { Creature } from "../utils/creature";
 
 import { tracker } from "src/tracker/stores/tracker";
-import type { UpdateLogMessage } from "index";
+import type { UpdateLogMessage } from "./logger.types";
 
 export interface LogState {
     name?: string;
@@ -80,7 +80,11 @@ export default class Logger {
                     "|",
                     player.hp ? `${player.hp}/${player.max}` : "-",
                     "|",
-                    [...(player.status.size ? player.status : ["-"])]
+                    [
+                        ...(player.status.size
+                            ? [...player.status].map((c) => c.name)
+                            : ["-"])
+                    ]
                         .join(", ")
                         .replace("|", "\\|"),
                     "|"
@@ -100,7 +104,11 @@ export default class Logger {
                     "|",
                     creature.hp ? `${creature.hp}/${creature.max}` : "-",
                     "|",
-                    [...(creature.status.size ? creature.status : ["-"])]
+                    [
+                        ...(creature.status.size
+                            ? [...creature.status].map((c) => c.name)
+                            : ["-"])
+                    ]
                         .join(", ")
                         .replace("|", "\\|"),
                     "|"
@@ -181,7 +189,11 @@ export default class Logger {
                         `${message.name} added ${message.ac} to AC`
                     );
                 } else {
-                    perCreature.push(`${message.name} AC set to ${message.ac ? message.ac : "be blank"}`);
+                    perCreature.push(
+                        `${message.name} AC set to ${
+                            message.ac ? message.ac : "be blank"
+                        }`
+                    );
                 }
             }
             if (message.status) {

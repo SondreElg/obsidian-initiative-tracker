@@ -1,8 +1,9 @@
 <script lang="ts">
-    import { formatDifficultyReport } from "src/utils/encounter-difficulty";
     import { tweened } from "svelte/motion";
     import { cubicOut } from "svelte/easing";
     import { getContext } from "svelte";
+    import { getRpgSystem } from "src/utils";
+    import type { RpgSystem } from "src/utils/rpg-system/rpgSystem";
     import type InitiativeTracker from "src/main";
 
     import { tracker } from "../stores/tracker";
@@ -17,21 +18,21 @@
         easing: cubicOut
     });
 
-    let report: string = "";
     $: {
-        if ($dif) {
-            let progress =
-                $dif.adjustedXp / $dif.budget.deadly > 1
-                    ? 1
-                    : $dif.adjustedXp / $dif.budget.deadly;
-            difficultyBar.set(progress);
-            report = formatDifficultyReport($dif);
+        if ($dif.thresholds.last().minValue > 0) {
+            difficultyBar.set(
+                Math.min(
+                    $dif.difficulty.value / $dif.thresholds.last().minValue,
+                    1
+                )
+            );
         }
     }
+    $: summary = $dif.difficulty.summary;
 </script>
 
-<div class="difficulty-bar-container" aria-label={report}>
-    <span>Easy</span>
+<div class="difficulty-bar-container" aria-label={summary}>
+    <span>{$dif.labels?.[0] ?? ""}</span>
     <span
         ><meter
             class="difficulty-bar"
@@ -42,7 +43,7 @@
             value={$difficultyBar}
         /></span
     >
-    <span>Deadly</span>
+    <span>{$dif.labels?.last() ?? ""}</span>
 </div>
 
 <style>

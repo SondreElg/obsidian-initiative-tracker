@@ -1,12 +1,13 @@
 <script lang="ts">
     import {
         ExtraButtonComponent,
-        ButtonComponent,
         Notice,
-        ToggleComponent
+        ToggleComponent,
+        TextComponent,
+        Platform
     } from "obsidian";
 
-    import { createEventDispatcher, onMount } from "svelte";
+    import { onMount } from "svelte";
 
     import { DICE } from "src/utils";
     import { SRDMonsterSuggestionModal } from "src/utils/suggester";
@@ -28,6 +29,14 @@
         creature = c;
     });
 
+    $: {
+        if (Platform.isMobile) {
+            $adding.splice(0, 1, [creature, amount]);
+        }
+    }
+
+    let modifier = JSON.stringify(creature.modifier ?? 0);
+    const prior = modifier;
     const saveButton = (node: HTMLElement) => {
         new ExtraButtonComponent(node)
             .setTooltip("Add Creature")
@@ -37,7 +46,25 @@
                     new Notice("Enter a name!");
                     return;
                 }
+                try {
+                    creature.modifier = JSON.parse(`${modifier}`);
+                } catch (e) {
+                    console.warn(
+                        "Initiative Tracker: Non-parseable modifier provided to creature."
+                    );
+                    creature.modifier = JSON.parse(prior);
+                }
                 if (!creature.modifier) {
+                    creature.modifier = JSON.parse(prior);
+                }
+                if (
+                    (Array.isArray(creature.modifier) &&
+                        !creature.modifier.every((m) => !isNaN(Number(m)))) ||
+                    isNaN(Number(creature.modifier))
+                ) {
+                    console.warn(
+                        "Initiative Tracker: Non-numeric modifier provided to creature."
+                    );
                     creature.modifier = 0;
                 }
                 if (
@@ -121,24 +148,51 @@
                 );
             });
     };
-    let nameInput: HTMLInputElement;
+    let nameInput: TextComponent, displayNameInput: HTMLInputElement;
+    const name = (node: HTMLElement) => {
+        nameInput = new TextComponent(node)
+            .setValue(creature.name)
+            .onChange((v) => (creature.name = v));
+    };
     let modal: SRDMonsterSuggestionModal;
-    onMount(() => {
-        modal = new SRDMonsterSuggestionModal(plugin, nameInput);
-        modal.onClose = async () => {
-            if (modal.creature) {
-                creature = Creature.from(modal.creature);
+    const createModal = () => {
+        modal = new SRDMonsterSuggestionModal(
+            plugin.app,
+            nameInput,
+            plugin.bestiary
+        );
+        modal.onSelect(async (selected) => {
+            if (selected.item) {
+                creature = Creature.from(selected.item);
 
                 creature.initiative = await plugin.getInitiativeValue(
                     creature.modifier
                 );
+                nameInput.setValue(creature.name);
             }
-        };
+            modal.close();
+        });
+    };
+
+    onMount(() => {
+        if (isEditing) {
+            setImmediate(() => {
+                displayNameInput.focus();
+                createModal();
+            });
+        } else {
+            createModal();
+        }
     });
     const hideToggle = (div: HTMLDivElement) => {
         new ToggleComponent(div)
             .setValue(creature.hidden)
             .onChange((v) => (creature.hidden = v));
+    };
+    const staticToggle = (div: HTMLDivElement) => {
+        new ToggleComponent(div)
+            .setValue(creature.static)
+            .onChange((v) => (creature.static = v));
     };
     const friendToggle = (div: HTMLDivElement) => {
         new ToggleComponent(div)
@@ -151,22 +205,13 @@
     <div class="create-new">
         <div>
             <label for="add-name">Creature</label>
-            <input
-                bind:this={nameInput}
-                bind:value={creature.name}
-                on:focus={function () {
-                    modal.open();
-                }}
-                id="add-name"
-                type="text"
-                name="name"
-                tabindex="0"
-            />
+            <div use:name id="add-name" />
         </div>
         <div>
             <label for="add-display">Display Name</label>
             <input
                 bind:value={creature.display}
+                bind:this={displayNameInput}
                 id="add-display"
                 type="text"
                 name="display"
@@ -184,12 +229,12 @@
             />
         </div>
         <div>
-            <label for="add-hp">Hit Dice</label>
+            <label for="hit-dice">Hit Dice</label>
             <input
                 bind:value={creature.hit_dice}
-                id="add-hp"
+                id="hit-dice"
                 type="text"
-                name="hp"
+                name="hitdice"
                 tabindex="0"
             />
         </div>
@@ -197,7 +242,7 @@
             <label for="add-ac">AC</label>
             <input
                 bind:value={creature.ac}
-                on:change={() => creature.dirty_ac=true}
+                on:change={() => (creature.dirty_ac = true)}
                 id="add-ac"
                 name="ac"
                 type="text"
@@ -207,10 +252,10 @@
         <div>
             <label for="add-mod">Modifier</label>
             <input
-                bind:value={creature.modifier}
+                bind:value={modifier}
                 id="add-mod"
-                type="number"
-                name="ac"
+                type="text"
+                name="add-mod"
                 tabindex="0"
             />
         </div>
@@ -228,6 +273,10 @@
         </div>
 
         {#key creature}
+            <div>
+                <label for="add-mod">Static Initiative</label>
+                <div use:staticToggle />
+            </div>
             <div>
                 <label for="add-mod">Hidden</label>
                 <div use:hideToggle />
@@ -249,7 +298,7 @@
             />
         </div>
     </div>
-    {#if !isEditing}
+    {#if !isEditing && !Platform.isMobile}
         <div class="context-buttons">
             <div use:cancelButton class="add-button cancel-button" />
             {#if $editing}

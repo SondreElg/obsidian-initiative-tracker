@@ -1,8 +1,8 @@
-import type { InitiativeTrackerData } from "index";
+import type { InitiativeTrackerData } from "src/settings/settings.types";
 import { Platform } from "obsidian";
 import { Conditions } from "./conditions";
 
-export const INTIATIVE_TRACKER_VIEW = "initiative-tracker-view";
+export const INITIATIVE_TRACKER_VIEW = "initiative-tracker-view";
 export const PLAYER_VIEW_VIEW = "initiative-tracker-player-view";
 export const CREATURE_TRACKER_VIEW = "initiative-tracker-creature-view";
 
@@ -12,20 +12,24 @@ export const DEFAULT_UNDEFINED = "–";
 
 export const META_MODIFIER = Platform.isMacOS ? "Meta" : "Control";
 
+export enum RollPlayerInitiativeBehavior {
+    Always,
+    Never,
+    SetToZero
+}
+
 export const DEFAULT_SETTINGS: InitiativeTrackerData = {
     players: [],
     parties: [],
     defaultParty: null,
-    homebrew: [],
     statuses: [...Conditions],
     unconsciousId: "Unconscious",
-    version: null,
+    version: [],
     canUseDiceRoll: false,
     preferStatblockLink: false,
     initiative: "1d20 + %mod%",
     modifier: null,
     sync: false,
-    leafletIntegration: false,
     playerMarker: "default",
     monsterMarker: "default",
     state: {
@@ -52,54 +56,19 @@ export const DEFAULT_SETTINGS: InitiativeTrackerData = {
     },
     hpOverflow: "ignore",
     additiveTemp: false,
+    rpgSystem: "dnd5e",
     logging: false,
     logFolder: "/",
     useLegacy: false,
-    integrateSRD: true,
     diplayPlayerHPValues: true,
     rollHP: false,
+    descending: true,
     builder: {
         showParty: true,
         showXP: true,
         sidebarIcon: true
-    }
-};
-
-export const XP_PER_CR: Record<string, number> = {
-    "0": 0,
-    "1/8": 25,
-    "1/4": 50,
-    "1/2": 100,
-    "1": 200,
-    "2": 450,
-    "3": 700,
-    "4": 1100,
-    "5": 1800,
-    "6": 2300,
-    "7": 2900,
-    "8": 3900,
-    "9": 5000,
-    "10": 5900,
-    "11": 7200,
-    "12": 8400,
-    "13": 10000,
-    "14": 11500,
-    "15": 13000,
-    "16": 15000,
-    "17": 18000,
-    "18": 20000,
-    "19": 22000,
-    "20": 25000,
-    "21": 33000,
-    "22": 41000,
-    "23": 50000,
-    "24": 62000,
-    "25": 75000,
-    "26": 90000,
-    "27": 105000,
-    "28": 120000,
-    "29": 135000,
-    "30": 155000
+    },
+    rollPlayerInitiatives: RollPlayerInitiativeBehavior.Always
 };
 
 export const OVERFLOW_TYPE: { [key: string]: string } = {
@@ -107,3 +76,13 @@ export const OVERFLOW_TYPE: { [key: string]: string } = {
     current: "current",
     temp: "temp"
 };
+
+export const DECIMAL_TO_VULGAR_FRACTION: Record<string, string> = {
+    0.125: "⅛",
+    0.25: "¼",
+    0.375: "⅜",
+    0.5: "½",
+    0.625: "⅝",
+    0.75: "¾",
+    0.875: "⅞"
+} as const;

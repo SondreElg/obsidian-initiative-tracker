@@ -1,10 +1,8 @@
-import type {
-    Condition,
-    CreatureState,
-    HomebrewCreature,
-    SRDMonster
-} from "index";
-import { Conditions, XP_PER_CR } from ".";
+import type { Condition } from "src/types/creatures";
+import type { HomebrewCreature } from "src/types/creatures";
+import type { SRDMonster } from "src/types/creatures";
+import type { CreatureState } from "src/types/creatures";
+import { Conditions } from ".";
 import { DEFAULT_UNDEFINED } from "./constants";
 import type InitiativeTracker from "src/main";
 
@@ -19,9 +17,10 @@ export function getId() {
 export class Creature {
     active: boolean;
     name: string;
-    modifier: number;
+    modifier: number | number[];
     hp: number;
     hit_dice?: string;
+    rollHP?: boolean;
     temp: number;
     ac: number | string;
     current_ac: number | string;
@@ -35,7 +34,8 @@ export class Creature {
     player: boolean;
     status: Set<Condition> = new Set();
     marker: string;
-    private _initiative: number;
+    initiative: number;
+    static: boolean = false;
     source: string | string[];
     id: string;
     xp: number;
@@ -44,33 +44,36 @@ export class Creature {
     display: string;
     friendly: boolean = false;
     "statblock-link": string;
-
-    getXP(plugin: InitiativeTracker) {
-        if (this.xp) return this.xp;
-        if (this.creature.cr) {
-            return XP_PER_CR[this.creature.cr] ?? 0;
+    cr: string | number;
+    path: string;
+    setModifier(modifier: number[] | number) {
+        if (modifier) {
+            if (Array.isArray(modifier)) {
+                this.modifier = [...modifier];
+            }
+            if (!isNaN(Number(modifier))) {
+                this.modifier = Number(modifier);
+            }
         }
-        const base = plugin.getBaseCreatureFromBestiary(this.name);
-        if (base && base.cr) {
-            return XP_PER_CR[base.cr] ?? 0;
-        }
+        this.modifier = this.modifier ?? 0;
     }
-
     constructor(public creature: HomebrewCreature, initiative: number = 0) {
         this.name = creature.name;
         this.display = creature.display;
-        this._initiative =
+        this.initiative =
             "initiative" in creature
                 ? (creature as Creature).initiative
                 : Number(initiative ?? 0);
-        this.modifier = Number(creature.modifier ?? 0);
-
+        this.static = creature.static ?? false;
+        this.setModifier(creature.modifier);
         this.current_ac = this.ac = creature.ac ?? undefined;
         this.dirty_ac = false;
         this.max = this.current_max = creature.hp ? Number(creature.hp) : 0;
         this.note = creature.note;
         this.level = creature.level;
         this.player = creature.player;
+
+        this.rollHP = creature.rollHP;
 
         this.marker = creature.marker;
 
@@ -84,11 +87,12 @@ export class Creature {
 
         this.hidden = creature.hidden ?? false;
 
-        if ("xp" in creature) {
-            this.xp = creature.xp;
-        } else if ("cr" in creature) {
-            this.xp = XP_PER_CR[`${creature.cr}`];
-        }
+        this.note = creature.note;
+        this.path = creature.path;
+
+        this.xp = creature.xp;
+
+        this.cr = creature.cr;
         this.id = creature.id ?? getId();
         if ("statblock-link" in creature) {
             this["statblock-link"] = (creature as any)[
@@ -114,13 +118,6 @@ export class Creature {
         return DEFAULT_UNDEFINED;
     }
 
-    get initiative() {
-        return this._initiative + this.modifier;
-    }
-    set initiative(x: number) {
-        this._initiative = Number(x) - this.modifier;
-    }
-
     getName() {
         let name = [this.display ?? this.name];
         /* if (this.display) {
@@ -143,16 +140,19 @@ export class Creature {
     *[Symbol.iterator]() {
         yield this.name;
         yield this.initiative;
+        yield this.static;
         yield this.modifier;
         yield this.max;
         yield this.ac;
         yield this.note;
+        yield this.path;
         yield this.id;
         yield this.marker;
         yield this.xp;
         yield this.hidden;
         yield this.hit_dice;
         yield this.current_ac;
+        yield this.rollHP;
     }
 
     static new(creature: Creature) {
@@ -161,7 +161,7 @@ export class Creature {
                 ...creature,
                 id: getId()
             },
-            creature._initiative
+            creature.initiative
         );
     }
 
@@ -184,7 +184,8 @@ export class Creature {
 
     update(creature: HomebrewCreature) {
         this.name = creature.name;
-        this.modifier = Number(creature.modifier ?? 0);
+
+        this.setModifier(creature.modifier);
 
         this.current_max = this.max = creature.hp ? Number(creature.hp) : 0;
 
@@ -208,13 +209,16 @@ export class Creature {
         return {
             name: this.name,
             display: this.display,
-            initiative: this.initiative - this.modifier,
+            initiative: this.initiative,
+            static: this.static,
             modifier: this.modifier,
             hp: this.max,
             currentMaxHP: this.current_max,
+            cr: this.cr,
             ac: this.ac,
             currentAC: this.current_ac,
             note: this.note,
+            path: this.path,
             id: this.id,
             marker: this.marker,
             currentHP: this.hp,
@@ -228,12 +232,21 @@ export class Creature {
             hidden: this.hidden,
             friendly: this.friendly,
             "statblock-link": this["statblock-link"],
-            hit_dice: this.hit_dice
+            hit_dice: this.hit_dice,
+            rollHP: this.rollHP
         };
     }
 
-    static fromJSON(state: CreatureState) {
-        const creature = new Creature(state, state.initiative);
+    static fromJSON(state: CreatureState, plugin: InitiativeTracker) {
+        let creature: Creature;
+        if (state.player) {
+            creature =
+                plugin.getPlayerByName(state.name) ??
+                new Creature(state, state.initiative);
+            creature.initiative = state.initiative;
+        } else {
+            creature = new Creature(state, state.initiative);
+        }
         creature.enabled = state.enabled;
 
         creature.temp = state.tempHP ? state.tempHP : 0;

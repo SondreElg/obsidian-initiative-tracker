@@ -1,4 +1,4 @@
-import type { SRDMonster } from "../../../index";
+import type { SRDMonster } from "src/types/creatures";
 import { writable } from "svelte/store";
 import { players } from "./players";
 function createEncounter() {
@@ -32,6 +32,13 @@ function createEncounter() {
         set: (item: SRDMonster, count: number) =>
             update((monsters) => {
                 monsters.set(item, count);
+                return monsters;
+            }),
+        setMultiple: (creatures: [item: SRDMonster, count: number][]) =>
+            update((monsters) => {
+                for (const [item, count] of creatures) {
+                    monsters.set(item, count);
+                }
                 return monsters;
             }),
         empty: () => set(new Map())

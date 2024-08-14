@@ -3,7 +3,7 @@
     import { fade } from "svelte/transition";
     import { SyncLoader } from "svelte-loading-spinners";
 
-    import { AC, HP, INITIATIVE } from "src/utils";
+    import { AC, FRIENDLY, HP, INITIATIVE } from "src/utils";
     import type { Creature } from "src/utils/creature";
     import { createEventDispatcher } from "svelte";
 
@@ -44,6 +44,9 @@
     $: activeAndVisible = $ordered.filter((c) => c.enabled && !c.hidden);
 
     const name = (creature: Creature) => creature.getName();
+    const friendIcon = (node: HTMLElement) => {
+        setIcon(node, FRIENDLY);
+    };
 </script>
 
 <table class="initiative-tracker-table" transition:fade>
@@ -51,14 +54,20 @@
         <th style="width:5%"><strong use:iniIcon /></th>
         <th class="left" style="width:30%"><strong>Name</strong></th>
         <th style="width:15%" class="center"><strong use:hpIcon /></th>
-        <th style="width:15%" class="center"><strong use:acIcon /></th>
         <th><strong> Statuses </strong></th>
     </thead>
     <tbody>
         {#each activeAndVisible as creature (creature.id)}
             <tr class:active={amIActive(creature) && $state}>
                 <td class="center">{creature.initiative}</td>
-                <td>
+                <td class='name'>
+                    {#if creature.friendly}
+                        <div
+                            class="contains-icon"
+                            use:friendIcon
+                            aria-label={`This creature is an ally.`}
+                        />
+                    {/if}
                     {name(creature)}
                 </td>
                 <td
@@ -70,12 +79,6 @@
                     {:else}
                         <span>{getHpStatus(creature.hp, creature.max)}</span>
                     {/if}
-                </td>
-                <td
-                    class="ac center"
-                    class:dirty-ac={creature.current_ac != creature.ac}
-                >
-                    <span>{creature.current_ac ?? ""}</span>
                 </td>
                 <td class="center">
                     {[...creature.status].map((s) => s.name).join(", ")}
@@ -107,6 +110,11 @@
     .left {
         text-align: left;
     }
+    .name, .name > :global(svg) {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
     .center {
         text-align: center;
     }
@@ -127,8 +135,5 @@
     }
     :global(.theme-dark) .active {
         background-color: rgba(255, 255, 255, 0.1);
-    }
-    .dirty-ac {
-        font-weight: var(--font-bold);
     }
 </style>

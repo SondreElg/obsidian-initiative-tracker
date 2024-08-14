@@ -1,5 +1,12 @@
 <script lang="ts">
-    import { ExtraButtonComponent, Modal, Notice, Setting } from "obsidian";
+    import {
+        ExtraButtonComponent,
+        Menu,
+        Modal,
+        Notice,
+        Setting,
+        stringifyYaml
+    } from "obsidian";
 
     import Creature from "./Creature.svelte";
     import { Creature as CreatureCreator } from "../../../utils/creature";
@@ -8,7 +15,7 @@
     import { START_ENCOUNTER } from "src/utils";
     import { getContext } from "svelte";
     import { tracker } from "src/tracker/stores/tracker";
-    import type { CreatureState } from "index";
+    import type { CreatureState, SRDMonster } from "src/types/creatures";
     import { writable } from "svelte/store";
 
     const { players } = encounter;
@@ -72,6 +79,7 @@
                     round: 1,
                     state: false,
                     logFile: null,
+                    newLog: true,
                     roll: true,
                     rollHP
                 });
@@ -93,13 +101,14 @@
     const editIcon = (node: HTMLElement) => {
         new ExtraButtonComponent(node).setIcon("pencil");
     };
-
+    let saveButton: ExtraButtonComponent;
     const saveIcon = (node: HTMLElement) => {
-        new ExtraButtonComponent(node).setIcon("save");
+        saveButton = new ExtraButtonComponent(node).setIcon("save");
     };
+    $: saveButton?.setDisabled($encounter.size == 0);
     const save = () => {
         const modal = new Modal(app);
-        modal.contentEl.createEl("h4", { text: "Save Encounter" });
+        modal.titleEl.setText("Save Encounter");
         let encName: string =
             $name != "Encounter"
                 ? $name
@@ -107,12 +116,9 @@
         new Setting(modal.contentEl).setName("Encounter Name").addText((t) => {
             t.setPlaceholder(encName).onChange((v) => (encName = v));
         });
-        new Setting(modal.contentEl).addButton((b) =>
-            b.setButtonText("Save").onClick(() => {
-                if (encName in plugin.data.encounters) {
-                    new Notice("An encounter by that name already exists.");
-                    return;
-                }
+
+        const saveEncounter = () => {
+            try {
                 const creatures = [
                     ...[...$players].map((p) => CreatureCreator.from(p)),
                     ...[...$encounter.entries()]
@@ -123,14 +129,47 @@
                         )
                         .flat()
                 ];
-                plugin.data.encounters[encName] = {
+                plugin.addEncounter(encName, {
                     creatures: [...creatures.map((c) => c.toJSON())],
                     state: false,
                     name: encName,
                     round: 1,
-                    logFile: null
-                };
+                    roll: true,
+                    rollHP: plugin.data.rollHP,
+                    logFile: null,
+                    timestamp: Date.now()
+                });
+                plugin.saveSettings();
+                new Notice(`Encounter "${encName}" saved.`);
                 modal.close();
+            } catch (e) {
+                new Notice("There was an issue saving the encounter.");
+            }
+        };
+        new Setting(modal.contentEl).addButton((b) =>
+            b.setButtonText("Save").onClick(() => {
+                if (encName in plugin.data.encounters) {
+                    const confirm = new Modal(app);
+                    confirm.titleEl.setText("Are you sure?");
+                    confirm.contentEl.createEl("p", {
+                        text: "This will overwrite an existing encounter. Are you sure?"
+                    });
+                    new Setting(confirm.contentEl)
+                        .addButton((b) =>
+                            b.setButtonText("Overwrite").onClick(() => {
+                                confirm.close();
+                                saveEncounter();
+                            })
+                        )
+                        .addExtraButton((b) =>
+                            b.setIcon("cross").onClick(() => {
+                                confirm.close();
+                            })
+                        );
+                    confirm.open();
+                } else {
+                    saveEncounter();
+                }
             })
         );
         modal.open();
@@ -141,7 +180,7 @@
     };
     let exportIcon: ExtraButtonComponent;
     const exp = (node: HTMLElement) => {
-        exportIcon = new ExtraButtonComponent(node).setIcon("code");
+        exportIcon = new ExtraButtonComponent(node).setIcon("copy");
     };
     $: {
         if (exportIcon) {
@@ -150,21 +189,80 @@
                 exportIcon.setTooltip("");
             } else {
                 exportIcon.setDisabled(false);
-                exportIcon.setTooltip("Export Encounter to Note");
+                exportIcon.setTooltip("Copy Encounter Block");
             }
         }
     }
 
-    const load = (node: HTMLElement) => {
-        new ExtraButtonComponent(node)
-            .setIcon("import")
-            .setTooltip("Load Encounter")
-            .onClick(() => {});
+    let loadButton: ExtraButtonComponent;
+    const loadIcon = (node: HTMLElement) => {
+        loadButton = new ExtraButtonComponent(node)
+            .setIcon("upload")
+            .setTooltip("Load Encounter");
+    };
+    $: loadButton?.setDisabled(Object.keys(plugin.data.encounters).length == 0);
+    const load = (evt: MouseEvent) => {
+        const menu = new Menu();
+        for (const enc of Object.values(plugin.data.encounters)) {
+            menu.addItem((item) => {
+                item.setTitle(enc.name).onClick(() => {
+                    $name = enc.name;
+                    encounter.empty();
+                    players.empty();
+                    for (const creature of enc.creatures) {
+                        if (creature.player) {
+                            players.addFromState(creature);
+                        } else {
+                            encounter.add(
+                                CreatureCreator.fromJSON(
+                                    creature,
+                                    plugin
+                                ) as any as SRDMonster
+                            );
+                        }
+                    }
+                });
+            });
+        }
+        menu.showAtMouseEvent(evt);
     };
     const clear = (node: HTMLElement) => {
         new ExtraButtonComponent(node)
             .setIcon("eraser")
             .setTooltip("Clear Encounter");
+    };
+    const copy = async () => {
+        const enc: {
+            name?: string;
+            players?: string[];
+            creatures?: { [key: number]: string }[];
+        } = {};
+        if ($name?.length) {
+            enc.name = $name;
+        }
+        if ($players?.length) {
+            enc.players = $players.filter((p) => p.enabled).map((p) => p.name);
+        }
+        if ($encounter?.size) {
+            enc.creatures = [...$encounter.entries()].map(([c, v]) => {
+                return {
+                    [Number(v)]: `${c.name}${c.friendly ? ", friendly" : ""}${
+                        c.hidden ? ", hidden" : ""
+                    }`
+                };
+            });
+        }
+        try {
+            await navigator.clipboard.writeText(
+                `\`\`\`encounter\n${stringifyYaml(enc)}\`\`\``
+            );
+            new Notice("Encounter saved to clipboard");
+        } catch (e) {
+            console.error(e);
+            new Notice(
+                "Could not save encounter, please check console for errors"
+            );
+        }
     };
 </script>
 
@@ -182,7 +280,8 @@
     <div class="encounter-controls">
         <div use:start />
         <div use:saveIcon on:click={save} />
-        <!-- <div use:exp /> -->
+        <div use:loadIcon on:click={load} />
+        <div use:exp on:click={copy} />
         <!-- <div use:load /> -->
 
         <div

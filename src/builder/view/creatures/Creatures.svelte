@@ -1,22 +1,24 @@
 <script lang="ts">
     import Creature from "./Creature.svelte";
     import { getContext } from "svelte";
-    import Filters from "./Filters.svelte";
-    import type { SRDMonster } from "index";
-    import { prepareSimpleSearch, setIcon } from "obsidian";
+    import Filters from "../filters/Filters.svelte";
+    import { Menu, Notice, setIcon } from "obsidian";
     import Pagination from "./Pagination.svelte";
-    import { cr, size, type, sources, name } from "../../stores/filter";
-    import { convertFraction } from "src/utils";
-    import { get } from "svelte/store";
+    import type { BuiltFilterStore } from "../../stores/filter/filter";
 
-    import { createTable, SettingsModal } from "../../stores/table";
-    import { setContext } from "svelte/internal";
-    const plugin = getContext("plugin");
-    let original = plugin.bestiary as SRDMonster[];
-    const table = createTable(plugin, [...original]);
+    import type { BuiltTableStore } from "../../stores/table/table";
+    import { HeadersModal } from "src/builder/stores/table/headers-modal";
+    import { FiltersModal } from "src/builder/stores/filter/filters-modal";
+    import type InitiativeTracker from "src/main";
+    import Ajv from "ajv";
+    import schema from "../../stores/filter/filter-schema.json";
+    import type { BuilderState } from "src/builder/builder.types";
 
-    setContext<ReturnType<typeof createTable>>("table", table);
-    const { creatures, sortDir, allHeaders } = table;
+    const table = getContext<BuiltTableStore>("table");
+    const { sortDir, allHeaders } = table;
+    const filterStore = getContext<BuiltFilterStore>("filters");
+    const { filtered, layout } = filterStore;
+    const plugin = getContext<InitiativeTracker>("plugin");
 
     let slice = 50;
 
@@ -27,27 +29,96 @@
         setIcon(node, "chevron-down");
     };
 
-    name.subscribe((n) => {
-        if (!$table.length) return;
-        if (!n || !n.length) {
-            const header = $table.find((h) => h.active) ?? $table[0];
-            if (!header.active) header.active = true;
-            $creatures = [...original];
-        } else {
-            const search = prepareSimpleSearch(n);
-            const results: SRDMonster[] = [];
-            console.log("🚀 ~ file: Creatures.svelte:40 ~ original:", original);
-            for (const monster of original) {
-                if (search(monster.name)) {
-                    results.push(monster);
-                }
-            }
-            $creatures = results;
-        }
-    });
+    const settingsMenu = (evt: CustomEvent<MouseEvent>) => {
+        const menu = new Menu();
+        menu.addItem((item) => {
+            item.setTitle("Edit Headers").onClick(() => {
+                openHeadersModal();
+            });
+        })
+            .addItem((item) => {
+                item.setTitle("Edit Filters").onClick(() => {
+                    openFiltersModal();
+                });
+            })
+            .addSeparator()
+            .addItem((item) => {
+                item.setTitle("Export").onClick(() => {
+                    const link = createEl("a");
+                    const file = new Blob(
+                        [JSON.stringify(plugin.data.builder)],
+                        {
+                            type: "json"
+                        }
+                    );
+                    const url = URL.createObjectURL(file);
+                    link.href = url;
+                    link.download = `initiative-tracker-encounter-builder.json`;
+                    link.click();
+                });
+            })
+            .addItem((item) => {
+                item.setTitle("Import").onClick(() => {
+                    //validate;
+                    const ajv = new Ajv();
 
-    const openSettingsModal = () => {
-        const modal = new SettingsModal($table.map((t) => t.toState()));
+                    // validate is a type guard for MyData - type is inferred from schema type
+                    const validate = ajv.compile<BuilderState>(schema);
+                    const input = createEl("input", {
+                        attr: {
+                            type: "file",
+                            name: "builder_state",
+                            accept: ".json"
+                        }
+                    });
+                    input.onchange = async () => {
+                        const { files } = input;
+                        if (!files.length) return;
+
+                        const reader = new FileReader();
+                        reader.onload = async (
+                            event: ProgressEvent<FileReader>
+                        ) => {
+                            if (typeof event.target.result == "string") {
+                                let json: any;
+                                try {
+                                    json = JSON.parse(event.target.result);
+                                } catch (e) {
+                                    new Notice(
+                                        "There was an issue parsing the file as JSON."
+                                    );
+                                }
+                                if (validate(json)) {
+                                    plugin.data.builder = { ...json };
+                                    await plugin.saveSettings();
+                                    filterStore.resetLayout();
+                                } else {
+                                    console.log(
+                                        ...validate.errors.map((e) => e.message)
+                                    );
+                                    new Notice(
+                                        "This file does not match the builder state schema."
+                                    );
+                                }
+                            }
+                        };
+                        reader.readAsText(files[0]);
+                    };
+                    input.click();
+                });
+            });
+        menu.showAtMouseEvent(evt.detail);
+    };
+    const openFiltersModal = () => {
+        const modal = new FiltersModal($layout, filterStore);
+        modal.open();
+        modal.onClose = () => {
+            if (modal.canceled) return;
+            $layout = modal.layout;
+        };
+    };
+    const openHeadersModal = () => {
+        const modal = new HeadersModal($table.map((t) => t.toState()));
         modal.open();
         modal.onClose = () => {
             if (modal.canceled) return;
@@ -59,38 +130,12 @@
         };
     };
 
-    $: filtered = $creatures
-        .filter(
-            (c) =>
-                get(cr.isDefault) ||
-                (convertFraction(c.cr) >= $cr[0] &&
-                    convertFraction(c.cr) <= $cr[1])
-        )
-        .filter(
-            (c) =>
-                !$size.length ||
-                $size
-                    .map((s) => s?.toLowerCase())
-                    .includes(c.size?.toLowerCase())
-        )
-        .filter(
-            (c) =>
-                !$type.length ||
-                $type
-                    .map((s) => s?.toLowerCase())
-                    .includes(c.type?.toLowerCase())
-        )
-        .filter((c) =>
-            !$sources.length || typeof c.source == "string"
-                ? !$sources.includes(c.source as string)
-                : !c.source?.find((s) => $sources.includes(s))
-        );
     let page = 1;
-    $: pages = Math.ceil(filtered.length / slice);
+    $: pages = Math.ceil($filtered.length / slice);
 </script>
 
 <div class="filters">
-    <Filters on:settings={() => openSettingsModal()} />
+    <Filters on:settings={(evt) => settingsMenu(evt)} />
 </div>
 
 {#if $allHeaders.length}
@@ -116,7 +161,7 @@
             {/each}
         </thead>
         <tbody>
-            {#each filtered.slice($name?.length ? 0 : (page - 1) * slice, page * slice) as creature}
+            {#each $filtered.slice((page - 1) * slice, page * slice) as creature}
                 <Creature {creature} />
             {/each}
         </tbody>

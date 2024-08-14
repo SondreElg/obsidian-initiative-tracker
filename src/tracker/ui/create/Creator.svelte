@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { ButtonComponent, Platform } from "obsidian";
+    import { ButtonComponent, Platform, TFile } from "obsidian";
     import type InitiativeTracker from "src/main";
     import { tracker } from "src/tracker/stores/tracker";
     import { Creature } from "src/utils/creature";
@@ -31,8 +31,8 @@
     const add = (node: HTMLElement) => {
         new ButtonComponent(node)
             .setButtonText(isEditing ? "Save" : "Add to Encounter")
-            .onClick(() => {
-                if (!$adding.length && !isEditing) return;
+            .onClick(async () => {
+                if (!$adding.length && !isEditing && !Platform.isMobile) return;
                 if (isEditing) {
                     if ($editing.hp != creature.max) {
                         creature.max = creature.current_max = $editing.hp;
@@ -41,15 +41,28 @@
                         creature.current_ac = $editing.ac;
                         creature.dirty_ac = false;
                     }
+
                     tracker.replace(creature, $editing);
                 } else {
-                    const creatures = $adding.flatMap(([creature, amount]) =>
-                        [...Array(amount).keys()].map((k) =>
+                    const creatures = $adding.flatMap(([creature, amount]) => {
+                        return [...Array(amount).keys()].map((k) =>
                             Creature.new(creature)
-                        )
-                    );
+                        );
+                    });
 
                     tracker.add(plugin, rollHP, ...creatures);
+                }
+                if (creature?.player && creature?.path) {
+                    const file = await plugin.app.vault.getAbstractFileByPath(
+                        creature.path
+                    );
+                    if (file && file instanceof TFile)
+                        plugin.app.fileManager.processFrontMatter(file, (f) => {
+                            f.ac = creature.ac;
+                            f.hp = creature.max;
+                            f.level = creature.level;
+                            f.modifier = creature.modifier;
+                        });
                 }
                 dispatch("close");
             });
@@ -60,9 +73,12 @@
     class="initiative-tracker-creator-container"
     class:mobile={Platform.isMobileApp}
 >
-    <div class="initiative-tracker-creator" class:editing={isEditing}>
+    <div
+        class="initiative-tracker-creator"
+        class:editing={isEditing || Platform.isMobile}
+    >
         <Create {plugin} {editing} {adding} {isEditing} />
-        {#if !isEditing}
+        {#if !isEditing && !Platform.isMobile}
             <div class="creator-list">
                 <List {adding} {editing} {rollHP} />
                 <div>
@@ -79,7 +95,10 @@
     </div>
     <div class="buttons">
         <div use:cancel />
-        <div use:add disabled={!$adding.length && !isEditing} />
+        <div
+            use:add
+            class:disabled={!$adding.length && !isEditing && !Platform.isMobile}
+        />
     </div>
 </div>
 
@@ -100,7 +119,7 @@
         gap: 0.5rem;
     }
 
-    div[disabled="true"] > :global(button) {
+    div.disabled > :global(button) {
         cursor: not-allowed;
     }
     .creator-list {

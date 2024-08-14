@@ -1,21 +1,16 @@
 <script lang="ts">
     import { flip } from "svelte/animate";
-    import { EditorView } from "@codemirror/view";
     import { dndzone } from "svelte-dnd-action";
-    import { NAME_HEADER, TableHeader } from "../table";
-    import copy from "fast-copy";
-    import {
-        ButtonComponent,
-        Modal,
-        Setting,
-        TextAreaComponent,
-        setIcon
-    } from "obsidian";
+    import { NAME_HEADER, TableHeader } from "./table";
+    import { ButtonComponent, Setting, setIcon } from "obsidian";
     import { createEventDispatcher } from "svelte";
-    import { SortFunctions, TableHeaderState } from "index";
     import { SORT_NUMBER, SORT_STRING } from "src/utils";
-    import { EditModal } from "./index";
+    import { EditModal } from "./edit-modal";
     import { getId } from "src/utils/creature";
+    import {
+        SortFunctions,
+        type TableHeaderState
+    } from "src/builder/builder.types";
 
     const dispatch = createEventDispatcher<{
         update: TableHeaderState[];
@@ -112,7 +107,6 @@
                         (state.type != SortFunctions.CUSTOM ||
                             state?.func?.length)
                     ) {
-                        console.log(items.findIndex((i) => i.id == id));
                         items.splice(
                             items.findIndex((i) => i.id == id),
                             1,
